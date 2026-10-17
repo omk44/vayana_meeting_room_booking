@@ -11,6 +11,43 @@ The project follows a clean 3-layer architecture:
 - **Business Logic Layer (`BookingService.cs`)**: Validates time slot steps (15-min intervals), duration boundaries (15m to 4h), same-day constraints, user daily quota (max 3 active bookings/day), and coordinates the 20-thread concurrency simulation.
 - **Data Access Layer (`Database.cs`)**: Pure ADO.NET with raw SQL queries, schema initialization, room seeding, and atomic SQLite transactions with synchronization locks.
 
+### Application Flow (Sequence Diagram)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant CLI as Program.cs (CLI)
+    participant Service as BookingService.cs
+    participant DB as Database.cs
+    participant SQLite as meeting_rooms.db
+
+    User->>CLI: types "book R1 Alice 2026-11-01 10:00 2026-11-01 11:00"
+    CLI->>CLI: Tokenize input & dispatch command
+    CLI->>Service: BookRoom("R1", "Alice", "2026-11-01 10:00", "2026-11-01 11:00")
+    
+    Note over Service: 1. Validate 15-min alignment<br/>2. Validate same-day & duration (15m - 4h)
+    
+    Service->>DB: TryCreateBooking(roomId, "Alice", start, end, "2026-11-01")
+    
+    Note over DB: lock (_dbLock)<br/>Begin SQLite Transaction
+    
+    DB->>SQLite: Check user active bookings count (max 3/day)
+    SQLite-->>DB: Count < 3 (Valid)
+    
+    DB->>SQLite: Check clashing booking (start < newEnd AND end > newStart)
+    SQLite-->>DB: No clash found
+    
+    DB->>SQLite: INSERT INTO bookings ... VALUES (...)
+    SQLite-->>DB: Returns new row ID
+    
+    Note over DB: Commit Transaction
+    
+    DB-->>Service: Return (Success: true, CreatedBooking)
+    Service-->>CLI: Return BookingResult(Success: true, Message)
+    CLI->>User: Prints confirmation with booking ID
+```
+
 ---
 
 ## Engineering Principles & Technical Concepts Applied
